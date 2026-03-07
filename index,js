@@ -1,0 +1,21 @@
+require('dotenv').config();
+const express = require('express');
+const { loadPDF } = require('./pdfLoader');
+const webhook = require('./webhook');
+
+const app = express();
+app.use(express.json());
+
+// Health check
+app.get('/', (req, res) => res.send('🤖 Loan Bot is Running!'));
+
+// WhatsApp webhook
+app.get('/webhook', webhook.verify);
+app.post('/webhook', webhook.receive);
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, async () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  await loadPDF(); // Load PDF knowledge on startup
+});

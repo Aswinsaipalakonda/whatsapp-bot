@@ -1,0 +1,193 @@
+{
+  "name": "WhatsApp Bot with Webhook Verification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "get-webhook-node",
+      "name": "WhatsApp GET (Verification)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        200,
+        100
+      ],
+      "webhookId": "whatsapp-bot-get-1234"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {}
+      },
+      "id": "respond-webhook-node",
+      "name": "Verify Meta Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        450,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "post-webhook-node",
+      "name": "WhatsApp POST (Messages)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "whatsapp-bot-post-1234"
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.body.entry[0].changes[0].value.messages[0].text.body }}",
+        "options": {
+          "systemMessage": "You are a professional WhatsApp chatbot assistant for *Nidha Easy Loans*. You help users with personal loan eligibility checks and CIBIL score guidance.\n\n=== STRICT BEHAVIOR RULES ===\n\n1. GREETINGS: Always reply warmly to Hi, Hello, Hey, Hii.\n\n2. CIBIL SCORE CHECKING FLOW:\n   If the user wants to check their CIBIL score, collect details ONE BY ONE:\n   Step 1 → Full Name\n   Step 2 → Phone Number\n   Step 3 → PAN Card Number\n   Step 4 → Send payment link EXACTLY like this: \"Please complete the verification payment of ₹199 using this link: https://razorpay.me/@nidhaeasyloans to generate your CIBIL report. Reply with 'PAID' once done.\"\n   Step 5 → If the user replies \"PAID\" or similar, say \"Payment verified successfully! Your CIBIL score is 750 (Good).\"\n\n3. LOAN ELIGIBILITY FLOW (ONLY FOR PERSONAL LOANS):\n   Collect these ONE BY ONE:\n   Step 1 → Full Name\n   Step 2 → Age\n   Step 3 → Monthly Income\n   Step 4 → Employment Type\n   Step 5 → Existing EMIs\n   Step 6 → CIBIL Score\n   Step 7 → Loan Amount Required\n\n   ELIGIBILITY DECISION RULES:\n   ✅ ELIGIBLE if: CIBIL Score is ≥ 700, Age is between 21-60, Total EMIs ≤ 50% of monthly income.\n   ❌ NOT ELIGIBLE if any above condition fails.\n\n   If ELIGIBLE: Say \"Congratulations! Based on your details, you are eligible for the personal loan.\"\n   If NOT ELIGIBLE: Say \"Sorry, based on the details provided, you are not currently eligible for the loan.\"\n\n4. OTHER LOANS (Home, Car, etc.):\n   If the user asks for Home Loan, Car Loan, or any loan OTHER than Personal Loan, reply EXACTLY:\n   \"Our team will contact you soon regarding this.\"\n\n5. OFF-TOPIC RULE:\n   If user asks anything NOT related to loans or CIBIL, reply: \"I'm here only to assist with Loan and CIBIL related queries. 😊\""
+        }
+      },
+      "id": "ai-agent-node",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.1,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash"
+      },
+      "id": "gemini-model-node",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        400,
+        500
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "googleGeminiApi",
+          "name": "Google Gemini API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionId": "={{ $('WhatsApp POST (Messages)').item.json.body.entry[0].changes[0].value.messages[0].from }}",
+        "contextWindowLength": 20
+      },
+      "id": "memory-node",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.1,
+      "position": [
+        550,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v19.0/{{$('WhatsApp POST (Messages)').item.json.body.entry[0].changes[0].value.metadata.phone_number_id}}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_META_ACCESS_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $('WhatsApp POST (Messages)').item.json.body.entry[0].changes[0].value.messages[0].from }}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"{{ $json.output }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "send-reply-node",
+      "name": "Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        750,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "WhatsApp GET (Verification)": {
+      "main": [
+        [
+          {
+            "node": "Verify Meta Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp POST (Messages)": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {}
+}

@@ -1,21 +1,28 @@
-const Anthropic = require('@anthropic-ai/sdk');
-const { getKnowledge } = require('./pdfLoader');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { sendMessage } = require('./sendMessage');
+const { logToGoogleSheet } = require('./googleSheets');
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-async function getAIReply(from, userMessage, session) {
-  const knowledge = getKnowledge();
-
-  const systemPrompt = `
+const systemInstruction = `
 You are a professional WhatsApp chatbot assistant for *Nidha Easy Loans*.
-You help users with loan eligibility checks and CIBIL score guidance.
+You help users with personal loan eligibility checks and CIBIL score guidance.
 
 === STRICT BEHAVIOR RULES ===
 
-1. GREETINGS: Always reply warmly to Hi, Hello, Hey, Hii etc.
+1. GREETINGS: Always reply warmly to Hi, Hello, Hey, Hii etc., if they say hello alone. 
 
-2. LOAN ELIGIBILITY FLOW: Collect these ONE BY ONE (don't ask all at once):
+2. CIBIL SCORE CHECKING FLOW:
+   If the user wants to check their CIBIL score, collect details ONE BY ONE:
+   Step 1 → Full Name
+   Step 2 → Phone Number
+   Step 3 → PAN Card Number
+   Step 4 → Send payment link EXACTLY like this: "Please complete the verification payment of ₹199 using this link: https://razorpay.me/@nidhaeasyloans to generate your CIBIL report. Reply with 'PAID' once done."
+   Step 5 → If the user replies "PAID" or similar, say "Payment verified successfully! Your CIBIL score is 750 (Good)." 
+   And append exactly this secret code at the end of your message: [SAVE_CIBIL]
+
+3. LOAN ELIGIBILITY FLOW (ONLY FOR PERSONAL LOANS):
+   Collect these ONE BY ONE (don't ask all at once):
    Step 1 → Full Name
    Step 2 → Age
    Step 3 → Monthly Income
@@ -23,61 +30,84 @@ You help users with loan eligibility checks and CIBIL score guidance.
    Step 5 → Existing EMIs per month (if any)
    Step 6 → CIBIL Score (if known)
    Step 7 → Loan Amount Required
-   Step 8 → Loan Purpose
+   Step 8 → Loan Purpose (Personal)
 
-3. ELIGIBILITY DECISION RULES:
+   ELIGIBILITY DECISION RULES:
    ✅ ELIGIBLE if:
-   - CIBIL Score ≥ 700
-   - Age between 21-60
+   - CIBIL Score is ≥ 700
+   - Age is between 21-60
    - Total EMIs ≤ 50% of monthly income
-   - Income meets minimum requirement
+   - Monthly Income is decent (e.g. > ₹15,000)
    
-   ❌ NOT ELIGIBLE if any above condition fails
-   → Then say: "Our team will contact you to discuss further options. 🙏"
+   ❌ NOT ELIGIBLE if any above condition fails.
 
-4. UNKNOWN QUESTIONS RULE (VERY IMPORTANT):
-   If the user asks something that is NOT covered in the knowledge base below,
-   DO NOT make up an answer.
-   Instead reply EXACTLY:
-   "That's a great question! Our team will contact you shortly to assist with this. 🙏
-   Is there anything else I can help you with?"
-   Then internally flag: NEEDS_HUMAN=true
+   Once all are collected, inform the user about their eligibility.
+   - If ✅ ELIGIBLE: Say "Congratulations! Based on your details, you are eligible for the personal loan." and append [SAVE_LOAN:ELIGIBLE]
+   - If ❌ NOT ELIGIBLE: Say "Sorry, based on the details provided, you are not currently eligible for the loan." and append [SAVE_LOAN:REJECTED]
+
+4. OTHER LOANS (Home, Car, etc.):
+   If the user asks for Home Loan, Car Loan, or any loan OTHER than Personal Loan, reply EXACTLY:
+   "Our team will contact you soon regarding this."
+   And append exactly this secret code: [NEEDS_HUMAN]
 
 5. OFF-TOPIC RULE:
-   If user asks anything NOT related to loans or CIBIL (eg: weather, sports, news),
-   Reply: "I'm here only to assist with Loan and CIBIL related queries. 😊
-   How can I help you with your loan today?"
+   If user asks anything NOT related to loans or CIBIL, reply:
+   "I'm here only to assist with Loan and CIBIL related queries. 😊 How can I help you today?"
 
-6. KEEP MESSAGES SHORT — This is WhatsApp, not email.
-   Max 150 words per reply. Use emojis sparingly.
-
-=== KNOWLEDGE BASE ===
-${knowledge}
-=== END KNOWLEDGE BASE ===
+IMPORTANT: Ensure your tone is helpful but concise. Do not use more than 100 words per reply. WhatsApp formatting (bold, italic) is fine.
 `;
 
+const model = genAI.getGenerativeModel({ 
+  model: 'gemini-2.5-flash',
+  systemInstruction
+});
+
+async function getAIReply(from, userMessage, session) {
+  // We use Gemini's startChat to maintain native memory, but we will construct it manually from session.messages
+  
+  // Initialize messages format for Gemini
+  let history = session.messages.map(msg => ({
+    role: msg.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: msg.content }]
+  }));
+
+  // Add the new message
   session.messages.push({ role: 'user', content: userMessage });
-
-  const recentMessages = session.messages.slice(-20);
-
+  
   try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 500,
-      system: systemPrompt,
-      messages: recentMessages
+    const chat = model.startChat({
+      history: history.slice(-20) // send only last 20 messages for context
     });
 
-    const reply = response.content[0].text;
+    const result = await chat.sendMessage(userMessage);
+    const reply = result.response.text();
+
     session.messages.push({ role: 'assistant', content: reply });
 
-    // ✅ Detect if AI flagged human needed
-    if (reply.includes('NEEDS_HUMAN=true') || reply.includes('Our team will contact you')) {
+    // Internal flags processing
+    let cleanReply = reply;
+    
+    if (reply.includes('[SAVE_CIBIL]')) {
+      cleanReply = cleanReply.replace('[SAVE_CIBIL]', '').trim();
+      logToGoogleSheet(from, session.leadData?.name || 'Unknown', 'CIBIL Check', 'Completed', undefined);
+    } 
+    
+    if (reply.includes('[SAVE_LOAN:ELIGIBLE]')) {
+      cleanReply = cleanReply.replace('[SAVE_LOAN:ELIGIBLE]', '').trim();
+      logToGoogleSheet(from, session.leadData?.name || 'Unknown', 'Personal Loan', 'Eligible', true);
+    }
+    
+    if (reply.includes('[SAVE_LOAN:REJECTED]')) {
+      cleanReply = cleanReply.replace('[SAVE_LOAN:REJECTED]', '').trim();
+      logToGoogleSheet(from, session.leadData?.name || 'Unknown', 'Personal Loan', 'Rejected', false);
+    }
+    
+    if (reply.includes('[NEEDS_HUMAN]')) {
+      cleanReply = cleanReply.replace('[NEEDS_HUMAN]', '').trim();
       await notifyTeam(from, session, userMessage);
+      logToGoogleSheet(from, 'Unknown', 'Other Loan Query', 'Needs Human', undefined);
     }
 
-    // Clean any internal flags before sending to user
-    const cleanReply = reply.replace('NEEDS_HUMAN=true', '').trim();
     return cleanReply;
 
   } catch (err) {
@@ -86,20 +116,11 @@ ${knowledge}
   }
 }
 
-// ✅ Notify your team when human help needed
 async function notifyTeam(userPhone, session, question) {
-  const adminPhone = process.env.ADMIN_PHONE; // your WhatsApp number with country code
+  const adminPhone = process.env.ADMIN_PHONE; 
   if (!adminPhone) return;
 
-  const leadInfo = session.leadData || {};
-  const alertMsg = `🚨 *Human Assistance Needed*
-
-👤 User: ${userPhone}
-❓ Question: "${question}"
-📋 Lead Info: ${JSON.stringify(leadInfo, null, 2)}
-
-Please follow up with this user.`;
-
+  const alertMsg = `🚨 *Human Assistance Needed*\n\n👤 User: ${userPhone}\n❓ Question: "${question}"\n\nPlease follow up with this user.`;
   await sendMessage(adminPhone, alertMsg);
   console.log(`🔔 Team notified about user: ${userPhone}`);
 }

@@ -6,14 +6,23 @@ function getSession(phone) {
     sessions[phone] = {
       messages: [],        // full chat history for AI
       leadData: {},        // collected loan info
-      step: 'start'
+      step: 'start',
+      lastActive: Date.now()
     };
+  } else {
+    // Update lastActive whenever the session is accessed/updated
+    sessions[phone].lastActive = Date.now();
+    sessions[phone].nudged = false;
   }
   return sessions[phone];
+}
+
+function getAllSessions() {
+  return sessions;
 }
 
 function clearSession(phone) {
   delete sessions[phone];
 }
 
-module.exports = { getSession, clearSession };
+module.exports = { getSession, clearSession, getAllSessions };

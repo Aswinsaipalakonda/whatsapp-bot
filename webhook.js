@@ -83,8 +83,8 @@ exports.receive = async (req, res) => {
     // ✅ If user clicked "CIBIL Services" button
     if (userText === 'CIBIL Services') {
       session.step = 'cibil';
-      session.messages.push({ role: 'user', content: 'I want CIBIL services' });
-      const reply = await getAIReply(from, 'User selected CIBIL Services. Ask what CIBIL help they need.', session);
+      session.messages.push({ role: 'user', content: 'I want to check my CIBIL score' });
+      const reply = await getAIReply(from, 'User selected CIBIL Services. Start the CIBIL flow by asking for their full name.', session);
       await sendMessage(from, reply);
       return;
     }

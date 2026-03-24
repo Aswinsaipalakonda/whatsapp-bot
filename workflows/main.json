@@ -1,0 +1,1316 @@
+{
+  "name": "Nidha Easy Loans - Main Chat Bot",
+  "nodes": [
+    {
+      "id": "n5",
+      "name": "Code Parse Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        400
+      ],
+      "parameters": {
+        "jsCode": "let message;\nconst json = $input.first().json;\n\nif (json.body?.entry || json.entry) {\n    const body = json.body || json;\n    message = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];\n} else if (json.message) {\n    message = json.message;\n} else {\n    message = json;\n}\n\nif (!message || !message.from) {\n    return [{ json: { valid: false, reason: 'no_message' } }];\n}\n\nconst msgId = message.id || Date.now().toString();\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.processedIds) staticData.processedIds = {};\nif (staticData.processedIds[msgId]) {\n    return [{ json: { valid: false, reason: 'duplicate' } }];\n}\nstaticData.processedIds[msgId] = Date.now();\n\nconst now = Date.now();\nfor (const id in staticData.processedIds) {\n    if (now - staticData.processedIds[id] > 600000) {\n        delete staticData.processedIds[id];\n    }\n}\n\nconst from = message.from;\nlet text = '';\nlet msgType = message.type || 'text';\n\nif (msgType === 'text') {\n    text = message.text?.body?.trim() || message.text || '';\n} else if (msgType === 'interactive' || msgType === 'button') {\n    const btn = message.interactive?.button_reply || message.button;\n    const list = message.interactive?.list_reply;\n    text = btn?.title || list?.title || btn?.id || list?.id || text || '';\n    msgType = 'button';\n} else {\n    return [{ json: { valid: true, from, text: '', msgType: 'unsupported', isGreeting: false } }];\n}\n\nconst greetings = [\n    'hi','hii','hiii','hiiii','hello','hey','helo','hye','heya',\n    'good morning','good evening','good afternoon','goodmorning',\n    'start','namaste','hai','sup','yo','hy','hlw','howdy',\n    'greetings','menu','help','hola','salaam','namaskar'\n];\nconst isGreeting = greetings.includes(text.toLowerCase());\n\nreturn [{ json: { valid: true, from, text, msgType, isGreeting } }];"
+      }
+    },
+    {
+      "id": "n6",
+      "name": "IF Valid Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        720,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "n7",
+      "name": "IF Unsupported Type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        960,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.msgType }}",
+              "rightValue": "unsupported",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "n8",
+      "name": "HTTP Send Unsupported Msg",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1200,
+        280
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/758006660719179/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer YOUR_WHATSAPP_TOKEN_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\"messaging_product\":\"whatsapp\",\"to\":\"{{ $json.from }}\",\"type\":\"text\",\"text\":{\"body\":\"Please send a text message only. I cannot process voice notes, images or documents. 😊\"}}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n9",
+      "name": "Sheets Read User Session",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1200,
+        460
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "=",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Phone",
+              "lookupValue": "={{ $json.from }}"
+            }
+          ]
+        },
+        "options": {
+          "returnAllMatches": false
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "n10",
+      "name": "Code Determine Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        460
+      ],
+      "parameters": {
+        "jsCode": "const parsed = $('Code Parse Message').item.json;\nconst sheetRows = $input.all();\n\nconst from = parsed.from;\nconst text = parsed.text;\nconst isGreeting = parsed.isGreeting;\nconst msgType = parsed.msgType;\n\n// Get user row from sheet (first match or null)\nconst userRow = sheetRows.find(r => r.json && r.json.Phone === from);\nconst stage = userRow?.json?.Stage || 'NEW';\nconst rowIndex = userRow?.json?.row_number || null;\n\nlet route = 'AI_REPLY';\n\nif (isGreeting || stage === 'NEW' || text.toLowerCase() === 'menu') {\n  route = 'GREETING';\n} else if (text === 'loan_assistance' || text.includes('Loan Assistance') || text.toLowerCase().includes('personal loan')) {\n  route = 'START_LOAN';\n} else if (text === 'cibil_services' || text.includes('CIBIL Services') || text.toLowerCase().includes('cibil')) {\n  route = 'START_CIBIL';\n} else if (text.toLowerCase().includes('home loan') || text.toLowerCase().includes('car loan') || text.toLowerCase().includes('business loan') || text.toLowerCase().includes('education loan')) {\n  route = 'OTHER_SERVICES';\n} else if (stage === 'COLLECT_LOAN') {\n  route = 'LOAN_FLOW';\n} else if (stage === 'COLLECT_CIBIL') {\n  route = 'CIBIL_FLOW';\n} else if (stage === 'AWAITING_PAYMENT') {\n  route = 'PAYMENT_PENDING';\n}\n\nreturn [{\n  json: {\n    from, text, stage, route, rowIndex,\n    userRow: userRow?.json || null,\n    isNewUser: !userRow\n  }\n}];"
+      }
+    },
+    {
+      "id": "n11",
+      "name": "Switch Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1680,
+        460
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r1",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "GREETING",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "GREETING"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r2",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "START_LOAN",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "START_LOAN"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r3",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "START_CIBIL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "START_CIBIL"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r4",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "OTHER_SERVICES",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "OTHER_SERVICES"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r5",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "LOAN_FLOW",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "LOAN_FLOW"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r6",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "CIBIL_FLOW",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CIBIL_FLOW"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r7",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "PAYMENT_PENDING",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "PAYMENT_PENDING"
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "n12",
+      "name": "HTTP Send Welcome Buttons",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1920,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/758006660719179/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer 747130347822873"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "{\"messaging_product\": \"whatsapp\", \"to\": \"={{ $json.from }}\", \"type\": \"interactive\", \"interactive\": {\"type\": \"button\", \"body\": {\"text\": \"\\ud83d\\udc4b Welcome to *Nidha Easy Loans*\\n\\nWe help you with smart loan solutions and complete CIBIL support, all under one trusted platform.\\n\\nPlease choose what you’re looking for, and we’ll guide you step by step \\ud83d\\udc47\"}, \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"loan_assistance\", \"title\": \"\\ud83c\\udfe6 Loan Assistance\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"cibil_services\", \"title\": \"\\ud83d\\udcca CIBIL Services\"}}]}}}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n13",
+      "name": "Sheets Upsert User Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2160,
+        220
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "=",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $json.from }}",
+            "Stage": "NEW",
+            "Last Message Time": "={{ new Date().toISOString() }}",
+            "Eligibility": ""
+          },
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": [
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Stage",
+              "displayName": "Stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Last Message Time",
+              "displayName": "Last Message Time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Eligibility",
+              "displayName": "Eligibility",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "n14",
+      "name": "HTTP Send Other Services Msg",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1920,
+        380
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/758006660719179/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer YOUR_WHATSAPP_TOKEN_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\"messaging_product\":\"whatsapp\",\"to\":\"{{ $json.from }}\",\"type\":\"text\",\"text\":{\"body\":\"Thank you for reaching out! 🙏\\n\\nOur team will contact you shortly for other loan services like Home Loan, Car Loan, Business Loan, and Education Loan.\\n\\nExpect a call within 24 hours. ✅\"}}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n15",
+      "name": "HTTP Send Payment Reminder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1920,
+        540
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/758006660719179/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer YOUR_WHATSAPP_TOKEN_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\"messaging_product\":\"whatsapp\",\"to\":\"{{ $json.from }}\",\"type\":\"text\",\"text\":{\"body\":\"⏳ Your CIBIL score check payment is still pending.\\n\\nPlease complete the payment using the link sent earlier to get your CIBIL score.\\n\\nNeed a new link? Type *new link* and we will resend it. 😊\"}}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n16",
+      "name": "Code Build Gemini Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        700
+      ],
+      "parameters": {
+        "jsCode": "const routeData = $input.first().json;\nconst from = routeData.from;\nconst text = routeData.text;\nconst stage = routeData.stage || 'NEW';\nconst route = routeData.route;\nconst userRow = routeData.userRow || {};\n\n// Build conversation context from existing user data\nconst existingData = [];\nif (userRow.Name) existingData.push(`Name: ${userRow.Name}`);\nif (userRow.Age) existingData.push(`Age: ${userRow.Age}`);\nif (userRow.Employment) existingData.push(`Employment: ${userRow.Employment}`);\nif (userRow.Income) existingData.push(`Income: ${userRow.Income}`);\nif (userRow['Existing EMIs']) existingData.push(`Existing EMIs: ${userRow['Existing EMIs']}`);\nif (userRow['Loan Amount']) existingData.push(`Loan Amount Requested: ${userRow['Loan Amount']}`);\nif (userRow.PAN) existingData.push(`PAN: ${userRow.PAN}`);\nif (userRow.DOB) existingData.push(`DOB: ${userRow.DOB}`);\n\nlet flowInstruction = '';\n\nif (route === 'START_LOAN' || stage === 'COLLECT_LOAN') {\n  flowInstruction = `\nUSER WANTS PERSONAL LOAN. Current stage: ${stage}.\nAlready collected: ${existingData.join(', ') || 'nothing yet'}.\n\nCollect these ONE BY ONE in order (skip already collected):\n1. Full Name\n2. Age  \n3. Employment Type (Salaried / Self-Employed / Business Owner)\n4. Monthly Income (net take-home)\n5. Existing monthly EMI payments (if none, ask them to say 0)\n6. Loan Amount Required\n\nAfter collecting ALL 6 details, calculate eligibility:\nELIGIBLE if: Age 21-60 AND income >= 15000 AND total EMIs (existing + estimated new EMI) <= 50% of income\nNOT ELIGIBLE if any condition fails.\n\nWhen giving verdict:\n- If ELIGIBLE: end your message with exactly ##ELIGIBLE##\n- If NOT ELIGIBLE: end your message with exactly ##NOT_ELIGIBLE##\n`;\n} else if (route === 'START_CIBIL' || stage === 'COLLECT_CIBIL') {\n  flowInstruction = `\nUSER WANTS CIBIL SCORE CHECK. Current stage: ${stage}.\nAlready collected: ${existingData.join(', ') || 'nothing yet'}.\n\nCollect these ONE BY ONE in order (skip already collected):\n1. Full Name\n2. PAN Card Number (format: ABCDE1234F)\n3. Date of Birth (DD/MM/YYYY)\n4. Mobile Number linked to PAN\n\nAfter collecting ALL 4 details, end your message with exactly ##SEND_PAYMENT##\n`;\n} else {\n  flowInstruction = `\nAnswer the user's query about personal loans or CIBIL scores only.\nIf they ask about other loans (home, car, business, education), reply:\n\"Our team will contact you shortly for this service. 🙏\"\nIf you cannot answer, reply:\n\"Our team will contact you shortly. 🙏\"\n`;\n}\n\nconst systemPrompt = `You are a professional WhatsApp chatbot for Nidha Easy Loans India.\nYou ONLY handle Personal Loans and CIBIL Score checks.\n\nSTRICT RULES:\n- Keep replies SHORT (max 80 words) — this is WhatsApp\n- Ask only ONE question at a time\n- Be warm, friendly, professional\n- Use simple English\n- Use emojis sparingly\n\n${flowInstruction}\n\nIMPORTANT FLAGS (add at end of message when condition met, never explain them):\n##ELIGIBLE## — user qualifies for personal loan\n##NOT_ELIGIBLE## — user does not qualify\n##SEND_PAYMENT## — all CIBIL details collected\n##UPDATE_NAME:[value]## — when you collect name, add this flag\n##UPDATE_AGE:[value]## — when you collect age\n##UPDATE_EMPLOYMENT:[value]## — when you collect employment type\n##UPDATE_INCOME:[value]## — when you collect income\n##UPDATE_EMIS:[value]## — when you collect existing EMIs\n##UPDATE_LOANAMT:[value]## — when you collect loan amount\n##UPDATE_PAN:[value]## — when you collect PAN\n##UPDATE_DOB:[value]## — when you collect DOB\n##UPDATE_MOBILE:[value]## — when you collect mobile\n\nCurrent user data already in system:\n${existingData.join('\\n') || 'No data yet'}`;\n\nreturn [{\n  json: {\n    from,\n    route,\n    stage,\n    systemPrompt,\n    userMessage: text,\n    userRow\n  }\n}];"
+      }
+    },
+    {
+      "id": "n17",
+      "name": "HTTP Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2160,
+        700
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=YOUR_GEMINI_KEY_HERE",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\n  \"system_instruction\": {\n    \"parts\": [{ \"text\": \"{{ $json.systemPrompt.replace(/\\n/g, '\\\\n') }}\" }]\n  },\n  \"contents\": [{\n    \"parts\": [{ \"text\": \"{{ $json.userMessage }}\" }]\n  }],\n  \"generationConfig\": {\n    \"maxOutputTokens\": 400,\n    \"temperature\": 0.7\n  }\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n18",
+      "name": "Code Extract Gemini Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        700
+      ],
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst promptData = $('Code Build Gemini Prompt').item.json;\nconst from = promptData.from;\nconst route = promptData.route;\nconst userRow = promptData.userRow || {};\n\nlet replyText = '';\ntry {\n  replyText = response.candidates[0].content.parts[0].text || '';\n} catch(e) {\n  replyText = 'Our team will contact you shortly. 🙏';\n}\n\n// Detect action flags\nconst isEligible = replyText.includes('##ELIGIBLE##');\nconst isNotEligible = replyText.includes('##NOT_ELIGIBLE##');\nconst sendPayment = replyText.includes('##SEND_PAYMENT##');\n\n// Extract data update flags\nconst updates = {};\nconst flagPatterns = [\n  { key: 'Name',           flag: /##UPDATE_NAME:([^#]+)##/ },\n  { key: 'Age',            flag: /##UPDATE_AGE:([^#]+)##/ },\n  { key: 'Employment',     flag: /##UPDATE_EMPLOYMENT:([^#]+)##/ },\n  { key: 'Income',         flag: /##UPDATE_INCOME:([^#]+)##/ },\n  { key: 'Existing EMIs',  flag: /##UPDATE_EMIS:([^#]+)##/ },\n  { key: 'Loan Amount',    flag: /##UPDATE_LOANAMT:([^#]+)##/ },\n  { key: 'PAN',            flag: /##UPDATE_PAN:([^#]+)##/ },\n  { key: 'DOB',            flag: /##UPDATE_DOB:([^#]+)##/ },\n  { key: 'Mobile',         flag: /##UPDATE_MOBILE:([^#]+)##/ },\n];\n\nfor (const { key, flag } of flagPatterns) {\n  const match = replyText.match(flag);\n  if (match) updates[key] = match[1].trim();\n}\n\n// Determine new stage\nlet newStage = promptData.stage;\nif (isEligible || isNotEligible) newStage = 'COMPLETED';\nelse if (sendPayment) newStage = 'AWAITING_PAYMENT';\nelse if (route === 'START_LOAN' || route === 'LOAN_FLOW') newStage = 'COLLECT_LOAN';\nelse if (route === 'START_CIBIL' || route === 'CIBIL_FLOW') newStage = 'COLLECT_CIBIL';\n\n// Clean all flags from reply\nlet cleanReply = replyText;\nconst allFlags = /##[A-Z_]+(?::[^#]+)?##/g;\ncleanReply = cleanReply.replace(allFlags, '').trim();\n\nreturn [{\n  json: {\n    from,\n    replyText: cleanReply,\n    isEligible,\n    isNotEligible,\n    sendPayment,\n    newStage,\n    updates,\n    userRow\n  }\n}];"
+      }
+    },
+    {
+      "id": "n19",
+      "name": "IF Check Special Flags",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        700
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "flag1",
+              "leftValue": "={{ $json.sendPayment }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "n20",
+      "name": "HTTP Create Razorpay Link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2880,
+        600
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.razorpay.com/v1/payment_links",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\n  \"amount\": 49900,\n  \"currency\": \"INR\",\n  \"accept_partial\": false,\n  \"description\": \"CIBIL Score Check - Nidha Easy Loans\",\n  \"customer\": {\n    \"name\": \"{{ $json.userRow.Name || 'Customer' }}\",\n    \"contact\": \"+91{{ $json.from }}\"\n  },\n  \"notify\": { \"sms\": true, \"whatsapp\": false },\n  \"reminder_enable\": true,\n  \"notes\": {\n    \"phone\": \"{{ $json.from }}\",\n    \"purpose\": \"cibil_check\"\n  },\n  \"callback_url\": \"https://n8n.yourdomain.com/webhook/payment-verify\",\n  \"callback_method\": \"get\",\n  \"expire_by\": {{ Math.floor(Date.now()/1000) + 86400 }}\n}",
+        "options": {}
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "REPLACE_WITH_RAZORPAY_CREDENTIAL_ID",
+          "name": "Razorpay Basic Auth"
+        }
+      }
+    },
+    {
+      "id": "n21",
+      "name": "Code Build Payment Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        600
+      ],
+      "parameters": {
+        "jsCode": "const razorpayResponse = $input.first().json;\nconst extractData = $('Code Extract Gemini Reply').item.json;\nconst from = extractData.from;\n\nconst paymentLink = razorpayResponse.short_url || razorpayResponse.id || 'Payment link generation failed';\n\nconst message = `✅ *CIBIL Check Details Received!*\n\nTo get your CIBIL Score, please complete the payment of *₹499*:\n\n💳 *Payment Link:*\n${paymentLink}\n\n⏰ Link valid for 24 hours.\n\nOnce payment is confirmed, your CIBIL score report will be sent here within a few minutes. 🎯`;\n\nreturn [{ json: { from, replyText: message, paymentLinkId: razorpayResponse.id } }];"
+      }
+    },
+    {
+      "id": "n22",
+      "name": "Sheets Update Awaiting Payment",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        3120,
+        760
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "=",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $json.from }}",
+            "Stage": "AWAITING_PAYMENT",
+            "Last Message Time": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": [
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Stage",
+              "displayName": "Stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Last Message Time",
+              "displayName": "Last Message Time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "n23",
+      "name": "Sheets Update User Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2880,
+        820
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "=",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $json.from }}",
+            "Name": "={{ $json.updates.Name || $json.userRow.Name || '' }}",
+            "Age": "={{ $json.updates.Age || $json.userRow.Age || '' }}",
+            "Employment": "={{ $json.updates.Employment || $json.userRow.Employment || '' }}",
+            "Income": "={{ $json.updates.Income || $json.userRow.Income || '' }}",
+            "Existing EMIs": "={{ $json.updates['Existing EMIs'] || $json.userRow['Existing EMIs'] || '' }}",
+            "Loan Amount": "={{ $json.updates['Loan Amount'] || $json.userRow['Loan Amount'] || '' }}",
+            "PAN": "={{ $json.updates.PAN || $json.userRow.PAN || '' }}",
+            "DOB": "={{ $json.updates.DOB || $json.userRow.DOB || '' }}",
+            "Stage": "={{ $json.newStage }}",
+            "Eligibility": "={{ $json.isEligible ? 'ELIGIBLE' : $json.isNotEligible ? 'NOT ELIGIBLE' : $json.userRow.Eligibility || '' }}",
+            "Last Message Time": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": [
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Age",
+              "displayName": "Age",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Employment",
+              "displayName": "Employment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Income",
+              "displayName": "Income",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Existing EMIs",
+              "displayName": "Existing EMIs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Loan Amount",
+              "displayName": "Loan Amount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "PAN",
+              "displayName": "PAN",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "DOB",
+              "displayName": "DOB",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Stage",
+              "displayName": "Stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Eligibility",
+              "displayName": "Eligibility",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Last Message Time",
+              "displayName": "Last Message Time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "n24",
+      "name": "HTTP Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3360,
+        700
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/758006660719179/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer YOUR_WHATSAPP_TOKEN_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\"messaging_product\":\"whatsapp\",\"to\":\"{{ $json.from }}\",\"type\":\"text\",\"text\":{\"body\":\"{{ $json.replyText.replace(/\\n/g,'\\\\n').replace(/\"/g,'\\\\\"') }}\"}}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n1",
+      "name": "Webhook GET Verify",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        160
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "nidha-whatsapp"
+    },
+    {
+      "id": "n2",
+      "name": "Code Verify Challenge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        160
+      ],
+      "parameters": {
+        "jsCode": "const q = .first().json.query || {};\n\n// Hardcode your verify token directly here\nconst VERIFY_TOKEN = 'nidha_verify_2024';\n\nif (q['hub.mode'] === 'subscribe' && q['hub.verify_token'] === VERIFY_TOKEN) {\n  return [{ json: { challenge: q['hub.challenge'], status: 'ok' } }];\n}\n\nreturn [{ json: { challenge: 'FORBIDDEN', status: 'fail' } }];"
+      }
+    },
+    {
+      "id": "n3",
+      "name": "Respond Webhook Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        720,
+        160
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ .challenge }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "n4",
+      "name": "Webhook POST Messages",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "webhookId": "nidha-whatsapp"
+    },
+    {
+      "id": "n1",
+      "name": "Webhook GET Verify",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        160
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "nidha-whatsapp"
+    },
+    {
+      "id": "n2",
+      "name": "Code Verify Challenge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        160
+      ],
+      "parameters": {
+        "jsCode": "const q = .first().json.query || {};\n\n// Hardcode your verify token directly here\nconst VERIFY_TOKEN = 'nidha_verify_2024';\n\nif (q['hub.mode'] === 'subscribe' && q['hub.verify_token'] === VERIFY_TOKEN) {\n  return [{ json: { challenge: q['hub.challenge'], status: 'ok' } }];\n}\n\nreturn [{ json: { challenge: 'FORBIDDEN', status: 'fail' } }];"
+      }
+    },
+    {
+      "id": "n3",
+      "name": "Respond Webhook Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        720,
+        160
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ .challenge }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "n4",
+      "name": "Webhook POST Messages",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "webhookId": "nidha-whatsapp"
+    }
+  ],
+  "connections": {
+    "Code Parse Message": {
+      "main": [
+        [
+          {
+            "node": "IF Valid Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid Message": {
+      "main": [
+        [
+          {
+            "node": "IF Unsupported Type",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF Unsupported Type": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Unsupported Msg",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets Read User Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Read User Session": {
+      "main": [
+        [
+          {
+            "node": "Code Determine Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Determine Route": {
+      "main": [
+        [
+          {
+            "node": "Switch Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Route": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Welcome Buttons",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code Build Gemini Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code Build Gemini Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Send Other Services Msg",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code Build Gemini Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code Build Gemini Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Send Payment Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code Build Gemini Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Send Welcome Buttons": {
+      "main": [
+        [
+          {
+            "node": "Sheets Upsert User Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Build Gemini Prompt": {
+      "main": [
+        [
+          {
+            "node": "HTTP Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Code Extract Gemini Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Extract Gemini Reply": {
+      "main": [
+        [
+          {
+            "node": "IF Check Special Flags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Check Special Flags": {
+      "main": [
+        [
+          {
+            "node": "HTTP Create Razorpay Link",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets Update User Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Create Razorpay Link": {
+      "main": [
+        [
+          {
+            "node": "Code Build Payment Message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sheets Update Awaiting Payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Build Payment Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Update User Data": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook GET Verify": {
+      "main": [
+        [
+          {
+            "node": "Code Verify Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Verify Challenge": {
+      "main": [
+        [
+          {
+            "node": "Respond Webhook Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook POST Messages": {
+      "main": [
+        [
+          {
+            "node": "Code Parse Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": [
+    {
+      "name": "WhatsApp"
+    },
+    {
+      "name": "Nidha Easy Loans - Main Chat Bot"
+    },
+    {
+      "name": "Gemini AI"
+    }
+  ]
+}

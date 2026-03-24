@@ -1,0 +1,287 @@
+{
+  "name": "Nidha Easy Loans - Daily Follow-Up",
+  "nodes": [
+    {
+      "id": "s1",
+      "name": "Schedule Daily 10AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "s2",
+      "name": "Sheets Read All Users",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "=",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "s3",
+      "name": "Code Filter Inactive Users",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const allRows = $input.all();\nconst now = Date.now();\nconst twentyFourHours = 24 * 60 * 60 * 1000;\n\nconst inactive = allRows.filter(row => {\n  const stage = row.json.Stage || '';\n  const lastTime = row.json['Last Message Time'] || '';\n  const phone = row.json.Phone || '';\n\n  // Skip completed or new (never started)\n  if (!phone) return false;\n  if (stage === 'COMPLETED' || stage === 'CIBIL_DONE') return false;\n  if (stage === 'NEW' || stage === '') return false;\n\n  // Check if last message was more than 24 hours ago\n  if (!lastTime) return false;\n  const lastTimestamp = new Date(lastTime).getTime();\n  const elapsed = now - lastTimestamp;\n  return elapsed > twentyFourHours;\n});\n\nreturn inactive.map(row => ({\n  json: {\n    from: row.json.Phone,\n    name: row.json.Name || 'there',\n    stage: row.json.Stage,\n    lastTime: row.json['Last Message Time']\n  }\n}));"
+      }
+    },
+    {
+      "id": "s4",
+      "name": "IF Has Inactive Users",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "hasUsers",
+              "leftValue": "={{ $json.from }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "s5",
+      "name": "Code Build Followup Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        260
+      ],
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst from = item.from;\nconst name = item.name || 'there';\nconst stage = item.stage || '';\n\nlet message = '';\n\nif (stage === 'COLLECT_LOAN') {\n  message = `👋 Hi ${name}!\\n\\nWe noticed you were checking your *Personal Loan eligibility* with us yesterday.\\n\\nWould you like to continue? Just reply and we'll pick up right where we left off. 😊\\n\\n_Nidha Easy Loans_`;\n} else if (stage === 'COLLECT_CIBIL') {\n  message = `👋 Hi ${name}!\\n\\nYou were in the process of checking your *CIBIL Score* with us.\\n\\nWould you like to continue? Just reply *yes* and we'll continue. 😊\\n\\n_Nidha Easy Loans_`;\n} else if (stage === 'AWAITING_PAYMENT') {\n  message = `👋 Hi ${name}!\\n\\nYour *CIBIL Score payment* is still pending.\\n\\nComplete the payment to get your CIBIL score report. Type *new link* if you need a fresh payment link. 💳\\n\\n_Nidha Easy Loans_`;\n} else {\n  message = `👋 Hi ${name}!\\n\\nWe noticed you reached out to us recently about loan or CIBIL services.\\n\\nWe're here to help whenever you're ready! Just say *Hi* to get started. 😊\\n\\n_Nidha Easy Loans_`;\n}\n\nreturn [{ json: { from, replyText: message } }];"
+      }
+    },
+    {
+      "id": "s6",
+      "name": "HTTP Send Followup Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1440,
+        260
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/758006660719179/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer YOUR_WHATSAPP_TOKEN_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\"messaging_product\":\"whatsapp\",\"to\":\"{{ $json.from }}\",\"type\":\"text\",\"text\":{\"body\":\"{{ $json.replyText.replace(/\\n/g,'\\\\n').replace(/\"/g,'\\\\\"') }}\"}}",
+        "options": {}
+      }
+    },
+    {
+      "id": "s7",
+      "name": "Sheets Update Followup Time",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1680,
+        260
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "=",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $json.from }}",
+            "Last Message Time": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": [
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Last Message Time",
+              "displayName": "Last Message Time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Daily 10AM": {
+      "main": [
+        [
+          {
+            "node": "Sheets Read All Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Read All Users": {
+      "main": [
+        [
+          {
+            "node": "Code Filter Inactive Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Filter Inactive Users": {
+      "main": [
+        [
+          {
+            "node": "IF Has Inactive Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Inactive Users": {
+      "main": [
+        [
+          {
+            "node": "Code Build Followup Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Code Build Followup Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Followup Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Send Followup Message": {
+      "main": [
+        [
+          {
+            "node": "Sheets Update Followup Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "tags": [
+    {
+      "name": "Follow-Up"
+    },
+    {
+      "name": "Scheduler"
+    }
+  ]
+}

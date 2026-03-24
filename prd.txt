@@ -1,0 +1,7 @@
+When a user will send a message it may be hey, hi , hiii, hii, anything like a greeting it should be respond according to the user mesage and currently I will build the agent only for personal loans and cibil score checking. If the user wants to check their cibil score then it should be aak some details and then it has to send a payment link to the user in the chat. Once the payment verified then the user will get their cibil score. 
+
+The every user chat has to store in a excel sheet. And the AI should analyse that the user is fit for the loan application then it should be mark as green in the excel sheet. If not red color. 
+
+If the user asks for other loans like home loan etc . Then it should send a message like our team contact you soon. 
+
+If the user will not respond or stop between the chat. The Ai bot  should start a new chat on the next day to the user automatically. 

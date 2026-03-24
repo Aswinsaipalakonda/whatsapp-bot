@@ -1,100 +1,108 @@
-# 🤖 Nidha Easy Loans - WhatsApp Bot
+# WhatsApp Loan Bot
 
-![WhatsApp](https://img.shields.io/badge/WhatsApp-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)
-![NodeJS](https://img.shields.io/badge/Node.js-43853D?style=for-the-badge&logo=node.js&logoColor=white)
-![Express.js](https://img.shields.io/badge/Express.js-404D59?style=for-the-badge)
-![Google Gemini](https://img.shields.io/badge/Gemini_AI-4285F4?style=for-the-badge&logo=google&logoColor=white)
-![Google Sheets](https://img.shields.io/badge/Google_Sheets-34A853?style=for-the-badge&logo=google-sheets&logoColor=white)
+A WhatsApp chatbot for Personal Loans and CIBIL Score checking, built with Node.js and deployable on Vercel.
 
-A smart, AI-powered WhatsApp chatbot built for **Nidha Easy Loans**. This bot automates customer inquiries, evaluates loan eligibility, provides CIBIL score checks with payment simulations, and logs all chats into Google Sheets color-coded by eligibility. It uses natural language processing powered by **Google's Gemini 2.5 Flash**.
+## Features
 
----
+- **Greeting Handler**: Responds to hi, hello, hey, etc.
+- **CIBIL Score Check**: Collects user details and sends payment link
+- **Personal Loan Eligibility**: Checks loan eligibility based on income and EMIs
+- **Other Loans**: Notifies team for home, car, education, and business loans
+- **Google Sheets Integration**: Stores all user data and conversation logs
+- **Daily Follow-up**: Automatically follows up with inactive users
+- **AI-Powered Intent Classification**: Uses Gemini AI to understand user intent
 
-## ✨ Features
-
-- **💬 WhatsApp Cloud API Integration**: Seamless connectivity to receive and send messages directly on WhatsApp.
-- **🧠 Gemini AI Powered**: Dynamically talks to users, enforcing strict conversational paths for CIBIL & Personal Loans.
-- **📊 Google Sheets Logging**: Logs every inquiry dynamically (Eligible: Green, Rejected: Red).
-- **💸 CIBIL Payment Simulation**: Serves Razorpay links dynamically when a user asks for a CIBIL score.
-- **🔘 Interactive Buttons**: Greets users automatically using WhatsApp's interactive buttons for a beautiful UI experience.
-- **🛡️ Lead & Eligibility Qualification**: Evaluates CIBIL, age, and EMI limits natively using Gemini structured extraction.
-- **⏰ Inactive User Nudge**: CRON job runs daily to message dormant users and push them back into the sales funnel.
-- **🚨 Human Handoff / Admin Notification**: Modally triggers human assistance for Home Loans/Car Loans & Edge Cases alerting the `ADMIN_PHONE`.
-
----
-
-## 🛠️ Tech Stack
-
-- **Node.js**: JavaScript runtime environment.
-- **Express.js**: Web framework used to expose the `/webhook` endpoint.
-- **@google/generative-ai**: Integrates Google Gemini Model.
-- **googleapis**: Edits Google Sheets dynamically.
-- **node-cron**: Background job scheduler.
-- **Axios**: HTTP client for communicating with the Facebook/WhatsApp Graph API.
-
----
-
-## 📂 Project Structure
-
-```text
-📁 whatsapp-bot
-├── 📄 .env                 # Environment variables (secrets/keys)
-├── 📄 ai.js                # Core AI logic (Gemini system prompts & processing)
-├── 📄 index.js             # Express server setup, webhook routing & Cron Job
-├── 📄 googleSheets.js      # Google Sheets append & format logic
-├── 📄 sendMessage.js       # Utility functions to send texts & buttons to Graph API
-├── 📄 sessions.js          # In-memory session manager with inactivity tracking
-├── 📄 webhook.js           # Handles incoming WhatsApp webhooks & routing
-├── 📄 service-account.json # (NOT INCLUDED) Google Sheets Auth file
-└── 📄 package.json         # Project dependencies
-```
-
----
-
-## 🚀 Setup & Installation
+## Setup
 
 ### 1. Prerequisites
 
-- [Node.js](https://nodejs.org/) installed.
-- A **Meta Developer Account** with a WhatsApp Cloud API setup.
-- A **Google AI Studio** Gemini API Key.
-- A **Google Cloud Console** Service Account with Google Sheets API access.
+- Node.js 18+
+- Vercel CLI (`npm i -g vercel`)
+- Meta Business Account with WhatsApp API access
+- Google Cloud Service Account
+- Razorpay Account
+- Gemini API Key
 
-### 2. Install Dependencies
+### 2. Environment Variables
+
+Copy `.env.example` to `.env.local` and fill in your credentials:
+
+```bash
+cp .env.example .env.local
+```
+
+### 3. Google Sheets Setup
+
+1. Create a new Google Sheet
+2. Create a service account in Google Cloud Console
+3. Share the sheet with the service account email
+4. The bot will automatically create headers on first run
+
+**Sheet Structure:**
+| Phone | Name | DOB | PAN | Stage | CIBIL Score | Employment | Income | Loan Amount | Existing EMI | Eligibility | Last Message Time | Color | Payment ID |
+
+### 4. Meta WhatsApp Setup
+
+1. Go to [developers.facebook.com](https://developers.facebook.com)
+2. Create a Business App
+3. Add WhatsApp product
+4. Configure webhook URL: `https://your-app.vercel.app/api/webhook`
+5. Set verify token: `nidha_verify_token_2024`
+6. Subscribe to `messages` webhook field
+
+### 5. Razorpay Setup
+
+1. Get your API keys from Razorpay Dashboard
+2. Configure webhook URL: `https://your-app.vercel.app/api/payment-callback`
+3. Enable `payment_link.paid` event
+
+### 6. Deploy to Vercel
 
 ```bash
 npm install
+vercel --prod
 ```
 
-### 3. Environment Variables
+### 7. Configure Environment in Vercel
 
-Create `.env`:
+Go to Vercel Dashboard → Project → Settings → Environment Variables and add all variables from `.env.example`.
 
-```env
-PORT=3000
-VERIFY_TOKEN=your_custom_webhook_verify_token
-PHONE_NUMBER_ID=your_whatsapp_phone_number_id
-ACCESS_TOKEN=your_facebook_graph_api_access_token
-GEMINI_API_KEY=your_gemini_api_key
-SPREADSHEET_ID=your_google_sheet_id
-ADMIN_PHONE=919876543210
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/webhook` | GET | Meta webhook verification |
+| `/api/webhook` | POST | Receive WhatsApp messages |
+| `/api/payment-callback` | GET | Razorpay payment redirect |
+| `/api/payment-callback` | POST | Razorpay webhook |
+| `/api/cron/follow-up` | GET | Daily follow-up job |
+
+## Conversation Flow
+
+```
+User: "Hi"
+Bot: Welcome message + service buttons
+
+User: "Check CIBIL Score"
+Bot: Ask name → Ask DOB → Ask PAN → Send payment link
+
+User: "Personal Loan"
+Bot: Ask employment → Ask income → Ask loan amount → Ask EMIs → Show eligibility
+
+User: "Home Loan"
+Bot: "Our team will contact you soon"
 ```
 
-Also, upload your `service-account.json` downloaded from Google Cloud to the root directory for your Sheets integration.
+## Eligibility Criteria
 
-### 4. Start the Application
+A user is marked **GREEN** (eligible) if:
+- Monthly income ≥ ₹25,000
+- Total EMIs ≤ 50% of income
+- CIBIL score ≥ 650 (if available)
+- Loan amount ≤ 36 months of income
 
-```bash
-node index.js
-```
+Otherwise marked **RED** (not eligible).
 
----
+## License
 
-## 🔄 Deployment & Webhooks (ngrok)
-
-To test the bot locally with WhatsApp:
-1. Run `node index.js`.
-2. Map your local port 3000 to the web using `ngrok http 3000`.
-3. In your Meta Developer Dashboard, set the Webhook Callback URL to your ngrok URL `https://xxxx.ngrok-free.app/webhook`.
-4. Define your `VERIFY_TOKEN`.
-5. Send a message to your assigned Meta test number!
+MIT

@@ -1,0 +1,350 @@
+{
+  "name": "Nidha Easy Loans - Payment Verification",
+  "nodes": [
+    {
+      "id": "p1",
+      "name": "Webhook Payment Callback",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "payment-verify",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "p2",
+      "name": "Code Extract Payment Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const query = $input.first().json.query || {};\nconst paymentId = query.razorpay_payment_id || query.payment_id || '';\nconst paymentLinkId = query.razorpay_payment_link_id || '';\nconst status = query.razorpay_payment_link_status || '';\nconst phone = query.razorpay_payment_link_reference_id || '';\n\n// Try to get phone from notes if not in reference\nconst from = phone || query.from || '';\n\nreturn [{\n  json: {\n    paymentId,\n    paymentLinkId,\n    status,\n    from,\n    isSuccess: status === 'paid' || (paymentId && paymentId.length > 0)\n  }\n}];"
+      }
+    },
+    {
+      "id": "p3",
+      "name": "Respond Payment OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        720,
+        200
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Payment received. Thank you!",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "p4",
+      "name": "IF Payment Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        720,
+        340
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "pay1",
+              "leftValue": "={{ $json.isSuccess }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "p5",
+      "name": "HTTP Verify Razorpay Payment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        960,
+        260
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.razorpay.com/v1/payments/{{ $json.paymentId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "REPLACE_WITH_RAZORPAY_CREDENTIAL_ID",
+          "name": "Razorpay Basic Auth"
+        }
+      }
+    },
+    {
+      "id": "p6",
+      "name": "Code Build CIBIL Success Msg",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        260
+      ],
+      "parameters": {
+        "jsCode": "const payVerify = $input.first().json;\nconst from = $('Code Extract Payment Data').item.json.from;\nconst paymentId = $('Code Extract Payment Data').item.json.paymentId;\n\n// In testing phase: send mock CIBIL score\n// In production: integrate real CIBIL API here\nconst mockCibilScore = 742;\nconst mockReport = {\n  score: mockCibilScore,\n  rating: mockCibilScore >= 750 ? 'Excellent' : mockCibilScore >= 700 ? 'Good' : mockCibilScore >= 650 ? 'Fair' : 'Poor',\n  accounts: 3,\n  activeLoans: 1,\n  paymentHistory: '98% on time'\n};\n\nconst message = `✅ *Payment Confirmed!*\nPayment ID: ${paymentId}\n\n📊 *Your CIBIL Score Report*\n━━━━━━━━━━━━━━━━━\n🎯 *Score: ${mockReport.score} / 900*\n📈 Rating: *${mockReport.rating}*\n━━━━━━━━━━━━━━━━━\n📋 Total Accounts: ${mockReport.accounts}\n🏦 Active Loans: ${mockReport.activeLoans}\n✅ Payment History: ${mockReport.paymentHistory}\n━━━━━━━━━━━━━━━━━\n\n${mockCibilScore >= 700 \n  ? '🟢 Great news! Your score is good. You may be eligible for a Personal Loan. Type *Personal Loan* to check eligibility!'\n  : '🔴 Your score needs improvement. Our team will contact you with a plan to improve your CIBIL score.'}\n\n_Powered by Nidha Easy Loans_`;\n\nreturn [{ json: { from, replyText: message, cibilScore: mockReport.score } }];"
+      }
+    },
+    {
+      "id": "p7",
+      "name": "HTTP Send CIBIL Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1440,
+        260
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/758006660719179/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer YOUR_WHATSAPP_TOKEN_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\"messaging_product\":\"whatsapp\",\"to\":\"{{ $json.from }}\",\"type\":\"text\",\"text\":{\"body\":\"{{ $json.replyText.replace(/\\n/g,'\\\\n').replace(/\"/g,'\\\\\"') }}\"}}",
+        "options": {}
+      }
+    },
+    {
+      "id": "p8",
+      "name": "Sheets Update CIBIL Score",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1440,
+        400
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "=",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $json.from }}",
+            "CIBIL Score": "={{ $json.cibilScore }}",
+            "Stage": "CIBIL_DONE",
+            "Last Message Time": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": [
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CIBIL Score",
+              "displayName": "CIBIL Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Stage",
+              "displayName": "Stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Last Message Time",
+              "displayName": "Last Message Time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "p9",
+      "name": "HTTP Send Payment Failed Msg",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        960,
+        440
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/758006660719179/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer YOUR_WHATSAPP_TOKEN_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\"messaging_product\":\"whatsapp\",\"to\":\"{{ $json.from }}\",\"type\":\"text\",\"text\":{\"body\":\"❌ Payment could not be verified.\\n\\nPlease retry the payment or type *new link* to get a fresh payment link.\\nOur team is also available to help: +91 70368 11812\"}}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Payment Callback": {
+      "main": [
+        [
+          {
+            "node": "Respond Payment OK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code Extract Payment Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Extract Payment Data": {
+      "main": [
+        [
+          {
+            "node": "IF Payment Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Payment Success": {
+      "main": [
+        [
+          {
+            "node": "HTTP Verify Razorpay Payment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Send Payment Failed Msg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Verify Razorpay Payment": {
+      "main": [
+        [
+          {
+            "node": "Code Build CIBIL Success Msg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Build CIBIL Success Msg": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send CIBIL Score",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sheets Update CIBIL Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "tags": [
+    {
+      "name": "Payment"
+    },
+    {
+      "name": "CIBIL"
+    }
+  ]
+}

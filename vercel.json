@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/webhook",
+      "dest": "/api/webhook.js"
+    },
+    {
+      "src": "/api/payment-callback",
+      "dest": "/api/payment-callback.js"
+    },
+    {
+      "src": "/api/cron/follow-up",
+      "dest": "/api/cron/follow-up.js"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/follow-up",
+      "schedule": "30 4 * * *"
+    }
+  ]
+}
